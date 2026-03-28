@@ -2,14 +2,15 @@
 
 set -e
 
-echo "[*] Creating Android portable venv..."
+echo "[*] Setup Android Portable Toolkit (FULL)..."
 
 BASE_DIR=$(pwd)/android-venv
 BIN_DIR=$BASE_DIR/bin
 SCRCPY_DIR=$BASE_DIR/scrcpy
+LIB_DIR=$BASE_DIR/lib
 CONFIG_DIR=$BASE_DIR/config
 
-mkdir -p $BIN_DIR $SCRCPY_DIR $CONFIG_DIR
+mkdir -p $BIN_DIR $SCRCPY_DIR $LIB_DIR $CONFIG_DIR
 
 # =========================
 # 1. Download ADB
@@ -39,9 +40,6 @@ mkdir -p /tmp/scrcpy
 wget -q $SCRCPY_URL -O /tmp/scrcpy.tar.gz
 tar -xzf /tmp/scrcpy.tar.gz -C /tmp/scrcpy
 
-# =========================
-# 3. Copy FULL folder (FIX LỖI)
-# =========================
 SCRCPY_SRC=$(find /tmp/scrcpy -type d -name "scrcpy-*")
 
 cp -r $SCRCPY_SRC/* $SCRCPY_DIR/
@@ -50,7 +48,28 @@ chmod +x $SCRCPY_DIR/scrcpy
 chmod +x $SCRCPY_DIR/scrcpy-server
 
 # =========================
-# 4. Create activate.sh (giống venv)
+# 3. Bundle dependencies (.so)
+# =========================
+echo "[*] Copying shared libraries..."
+
+copy_libs() {
+    ldd "$1" | grep "=>" | awk '{print $3}' | while read lib; do
+        if [ -f "$lib" ]; then
+            cp -n "$lib" $LIB_DIR/ 2>/dev/null || true
+        fi
+    done
+}
+
+# copy dependencies của scrcpy
+copy_libs $SCRCPY_DIR/scrcpy
+
+# copy thêm ffmpeg + SDL nếu có
+cp /usr/lib/x86_64-linux-gnu/libSDL2* $LIB_DIR/ 2>/dev/null || true
+cp /usr/lib/x86_64-linux-gnu/libav* $LIB_DIR/ 2>/dev/null || true
+cp /usr/lib/x86_64-linux-gnu/libsw* $LIB_DIR/ 2>/dev/null || true
+
+# =========================
+# 4. Create activate.sh
 # =========================
 cat <<EOF > $BASE_DIR/activate.sh
 #!/bin/bash
@@ -58,6 +77,7 @@ cat <<EOF > $BASE_DIR/activate.sh
 BASE=\$(cd "\$(dirname "\${BASH_SOURCE[0]}")"; pwd)
 
 export PATH=\$BASE/bin:\$PATH
+export LD_LIBRARY_PATH=\$BASE/lib:\$LD_LIBRARY_PATH
 export ADB_VENDOR_KEYS=\$BASE/config/adb
 
 echo "[+] Android VENV Activated"
@@ -76,18 +96,18 @@ cat <<EOF > $BASE_DIR/run.sh
 BASE=\$(cd "\$(dirname "\$0")"; pwd)
 
 export PATH=\$BASE/bin:\$PATH
+export LD_LIBRARY_PATH=\$BASE/lib:\$LD_LIBRARY_PATH
 export ADB_VENDOR_KEYS=\$BASE/config/adb
 
 adb start-server
 
-# chạy đúng scrcpy portable
 \$BASE/scrcpy/scrcpy "\$@"
 EOF
 
 chmod +x $BASE_DIR/run.sh
 
 # =========================
-# 6. DONE
+# DONE
 # =========================
 echo "[+] DONE!"
 echo ""
