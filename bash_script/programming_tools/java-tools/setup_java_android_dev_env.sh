@@ -1,21 +1,9 @@
 #!/bin/bash
 
-# Smart Java + Android Development Environment Installer
-# Includes:
-# - OpenJDK
-# - Maven
-# - Gradle
-# - Git
-# - VS Code
-# - Android SDK basics
-# - adb / fastboot
-# - Java + Android extensions
-# - Only installs missing packages
-
 set -e
 
 echo "=========================================="
-echo " Java + Android Dev Environment Installer "
+echo " FULL Java + Android + DB Dev Environment "
 echo "=========================================="
 
 # -----------------------------
@@ -34,36 +22,12 @@ fi
 
 echo "[+] Package manager detected: $PKG"
 
-# -----------------------------
-# Helper: check command exists
-# -----------------------------
 exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
 # -----------------------------
-# Helper: apt package installed
-# -----------------------------
-apt_installed() {
-    dpkg -s "$1" >/dev/null 2>&1
-}
-
-# -----------------------------
-# Install package if missing
-# -----------------------------
-install_if_missing_apt() {
-    PKG_NAME=$1
-
-    if apt_installed "$PKG_NAME"; then
-        echo "[✓] $PKG_NAME already installed"
-    else
-        echo "[+] Installing $PKG_NAME ..."
-        sudo apt install -y "$PKG_NAME"
-    fi
-}
-
-# -----------------------------
-# APT Install Section
+# APT SECTION (Ubuntu/Debian)
 # -----------------------------
 install_apt() {
     sudo apt update
@@ -84,23 +48,31 @@ install_apt() {
         python3-pip
         ca-certificates
         software-properties-common
+
+        # Android
         adb
         fastboot
-        default-jdk
+
+        # Databases (FIXED)
+        postgresql
+        postgresql-contrib
+        mariadb-server
+        sqlite3
     )
 
     for pkg in "${packages[@]}"; do
-        install_if_missing_apt "$pkg"
+        if dpkg -s "$pkg" >/dev/null 2>&1; then
+            echo "[✓] $pkg already installed"
+        else
+            echo "[+] Installing $pkg ..."
+            sudo apt install -y "$pkg"
+        fi
     done
 
     # VS Code
-    if exists code; then
-        echo "[✓] VS Code already installed"
-    else
+    if ! exists code; then
         echo "[+] Installing VS Code..."
-
         wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
-
         sudo install -D -o root -g root -m 644 packages.microsoft.gpg \
             /etc/apt/keyrings/packages.microsoft.gpg
 
@@ -109,13 +81,36 @@ install_apt() {
 
         sudo apt update
         sudo apt install -y code
-
         rm -f packages.microsoft.gpg
     fi
+
+    # DBeaver
+    if ! exists dbeaver; then
+        echo "[+] Installing DBeaver..."
+        wget -O - https://dbeaver.io/debs/dbeaver.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/dbeaver.gpg
+        echo "deb [signed-by=/etc/apt/keyrings/dbeaver.gpg] https://dbeaver.io/debs/dbeaver-ce /" \
+            | sudo tee /etc/apt/sources.list.d/dbeaver.list
+        sudo apt update
+        sudo apt install -y dbeaver-ce
+    fi
+
+    # -----------------------------
+    # Start & enable DB services
+    # -----------------------------
+    echo "[+] Configuring databases..."
+
+    sudo systemctl enable postgresql || true
+    sudo systemctl start postgresql || true
+
+    sudo systemctl enable mariadb || true
+    sudo systemctl start mariadb || true
+
+    # PostgreSQL password
+    sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'password';" || true
 }
 
 # -----------------------------
-# DNF Install Section
+# DNF SECTION
 # -----------------------------
 install_dnf() {
     packages=(
@@ -133,17 +128,31 @@ install_dnf() {
         net-tools
         python3
         python3-pip
+
         android-tools
+
+        postgresql-server
+        postgresql-contrib
+        mariadb-server
+        sqlite
+
         code
     )
 
     for pkg in "${packages[@]}"; do
         sudo dnf install -y "$pkg"
     done
+
+    sudo postgresql-setup --initdb || true
+    sudo systemctl enable postgresql
+    sudo systemctl start postgresql
+
+    sudo systemctl enable mariadb
+    sudo systemctl start mariadb
 }
 
 # -----------------------------
-# Pacman Install Section
+# PACMAN SECTION
 # -----------------------------
 install_pacman() {
     packages=(
@@ -160,13 +169,30 @@ install_pacman() {
         net-tools
         python
         python-pip
+
         android-tools
+
+        postgresql
+        mariadb
+        sqlite
+
         code
     )
 
     sudo pacman -Sy --noconfirm "${packages[@]}"
+
+    sudo -iu postgres initdb --locale $LANG -E UTF8 -D /var/lib/postgres/data || true
+    sudo systemctl enable postgresql
+    sudo systemctl start postgresql
+
+    sudo mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql || true
+    sudo systemctl enable mariadb
+    sudo systemctl start mariadb
 }
 
+# -----------------------------
+# RUN INSTALL
+# -----------------------------
 case $PKG in
     apt) install_apt ;;
     dnf) install_dnf ;;
@@ -174,7 +200,7 @@ case $PKG in
 esac
 
 # -----------------------------
-# Install VS Code Extensions
+# VS Code Extensions
 # -----------------------------
 if exists code; then
     echo "[+] Installing VS Code Extensions..."
@@ -189,75 +215,31 @@ if exists code; then
         vscjava.vscode-spring-initializr
         vmware.vscode-spring-boot
         eamodio.gitlens
-
-        # Android / Mobile
-        Dart-Code.dart-code
-        Dart-Code.flutter
         ms-vscode.vscode-json
         formulahendry.code-runner
     )
 
     for ext in "${extensions[@]}"; do
-        echo "[+] Installing extension: $ext"
         code --install-extension "$ext" --force || true
     done
-else
-    echo "[!] VS Code not found, skipping extensions"
 fi
 
 # -----------------------------
-# Android SDK Note
+# VERIFY
 # -----------------------------
 echo ""
-echo "[!] Android full SDK recommendation:"
-echo "For complete Android development:"
-echo "Install Android Studio once for SDK Manager setup."
-echo ""
-echo "VS Code is excellent for:"
-echo "- Flutter"
-echo "- React Native"
-echo "- Android Java/Kotlin editing"
-echo "- ADB debugging"
-echo ""
-echo "But Android Studio is still best for:"
-echo "- Emulator"
-echo "- SDK Manager"
-echo "- Device Manager"
-echo "- Native Android Build tools"
-
-# -----------------------------
-# Verification
-# -----------------------------
-echo ""
-echo "=========================================="
-echo " Verification "
-echo "=========================================="
+echo "=========== VERIFY ==========="
 
 java -version || true
-javac -version || true
 mvn -version || true
 gradle -version || true
 git --version || true
 adb version || true
-fastboot --version || true
-code --version || true
+psql --version || true
+mysql --version || true
+sqlite3 --version || true
 
 echo ""
 echo "=========================================="
-echo " Installation Completed Successfully "
+echo " DONE - ENV READY "
 echo "=========================================="
-
-echo ""
-echo "Recommended stack:"
-echo "VS Code + Java + Android + Git + Terminal"
-echo ""
-echo "Ready for:"
-echo "- Java backend"
-echo "- Spring Boot"
-echo "- REST API"
-echo "- Android app development"
-echo "- Flutter"
-echo "- React Native"
-echo "- Source audit"
-echo "- Security research"
-echo "- Reverse engineering"
